@@ -1,0 +1,399 @@
+#!/bin/bash
+# Monday 1:29 AM Nov 06 2023
+# csce.txt
+# take 1 optional argument
+# $1: EdgeInduce / VertexInduce / Homomorphism / profiling
+
+mode="EdgeInduce";
+
+if [ "$1" == "EdgeInduce" ] || [ "$1" == "VertexInduce" ] \
+    || [ "$1" == "Homomorphism" ] || [ "$1" == "profiling" ]; then
+    mode="$1";
+else
+    echo "wrong argument 1. set mode=${mode}";
+fi
+
+
+###############################################################################
+
+script_dir=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P );
+root_dir=$( cd "$(dirname "${script_dir}")" ; pwd -P );
+cd "${root_dir}";
+
+algorithm="WCOJ";
+dataset_dir="../edgelist";
+execute="Compile";
+graph_storage="CSR.1";
+isomorphism="EdgeInduce";
+limit="10000";
+ordergenerator="RIDataGraph";
+ordergenerator_add="DAG";
+out_cpp="src/csr/codegen/out.cpp";
+program="./release.exe";
+symbreak="SymBreak2007";
+timeout="timeout";
+
+if [ "${mode}" != "profiling" ]; then
+    isomorphism="${mode}";
+fi
+
+function set_command() {
+    # inside function use global variables
+    command="${timeout} ${limit}s";
+    command="${command} time -f total_seconds=%e,max_Kbytes=%M";
+    command="${command} ${program}";
+    command="${command} -algorithm ${algorithm}";
+    command="${command} -execute ${execute}";
+    command="${command} -graph-storage ${graph_storage}";
+    command="${command} -isomorphism ${isomorphism}";
+    command="${command} -order-generator ${ordergenerator}";
+    command="${command} -order-generator-add ${ordergenerator_add}";
+    command="${command} -symmetry-breaking ${symbreak}";
+}
+
+
+###############################################################################
+# run experiment
+
+function DPCMNE_data_query() {
+    # 21:18 Sunday July 30, 2023
+    # paper: 2022-DPCMNE_Detecting_Protein_Complexes_From_Protein-Protein
+    # _Interaction_Networks_Via_Multi-Level_Network_Embedding
+    local tmp="
+    # block comment
+    graph information: DIP20170205.txt
+    directed: False vertex_count: 4935 edge_count: 43950
+    duplicated edge_count: 0 bidirected_edge count: 21975
+    max_in_degree 277 max_out_degree: 277 vertex_lable_count: 0
+    edge_label_count: 0
+    ";
+    algorithm="WCOJ";
+    execute="Compile";
+    graph_storage="CSR.1";
+    local data_name="$1";
+    local query_name="$2";
+    local mode="$3";
+    local start_size="$4";
+    local end_size="$5";
+    local prefix="${dataset_dir}/DPCMNE-undirected/unlabeled";
+    local data_file="${prefix}/${data_name}.txt";
+    local is_labeled="0";
+    local message="run DPCMNE_data_query()";
+    if [ ! "${end_size}" ]; then
+        # use the max end_size
+        end_size="28";
+    fi
+    echo "${message}: data_name=${data_name} query_name=${query_name}";
+    echo "mode=${mode} size=[${start_size}, ${end_size}]"
+    if [ "${mode}" != "all" ] && [ "${mode}" != "one" ]; then
+        echo "error. ${message} wrong mode=${mode}. expect all/one";
+        return -1;
+    fi
+    if [ ! -f "${data_file}" ]; then
+        echo "${message} data not found: ${data_file}";
+        return -1;
+    fi
+    # note the placement of $suffix in query_dir
+    local query_dir="${prefix}/complex";
+    if [ ! -d "${query_dir}" ]; then
+        echo "${message} query_dir not found: ${query_dir}";
+        return -2;
+    fi
+    local argument="-is-labeled ${is_labeled} -data-file ${data_file}";
+    local query_prefix="${query_dir}/${data_name}-${query_name}";
+    set_command;
+    for (( size=$((start_size)); size<=$((end_size)); size+=1 ))
+    do
+        for query_file in `ls "${query_prefix}-${size}-"*`
+        do
+            echo "${data_file}";
+            echo "${query_file}";
+            echo "isomorphism=${isomorphism}";
+            ${command} ${argument} -query-file "${query_file}";
+            echo;
+        done
+    done
+}
+
+
+function rapidmatch_data_query() {
+    # contains dense and sparse queries
+    # 13:42 PM, Tuesday July 25, 2023
+    # 2:57 AM, Sunday, Oct 22 2023
+    # should apply to human, wordnet, patents
+    algorithm="WCOJ";
+    execute="Compile";
+    graph_storage="CSR.1";
+    local data_name="$1";
+    local is_labeled="$2";
+    local mode="$3";
+    local head_index="$4";
+    local tail_index="$5";
+    local message="rapidmatch_data_query()";
+    echo "run ${message}: data_name=${data_name}";
+    echo "index=[${head_index}, ${tail_index}] mode=${mode}"
+    local prefix="${dataset_dir}/${data_name}-rapidmatch/";
+    if [ "${is_labeled}" == "1" ]; then
+        prefix="${prefix}/labeled";
+    else
+        prefix="${prefix}/unlabeled";
+    fi
+    local data_file="${prefix}/${data_name}.txt";
+    if [ ! -f "${data_file}" ]; then
+        echo "skip. ${message} data not found: ${data_file}";
+        return -1;
+    fi
+    local query_dir="${prefix}/query_graph"
+    if [ ! -d "${query_dir}" ]; then
+        echo "skip. ${message} query_dir not found: ${query_dir}";
+        return -2;
+    fi
+    if [ "${mode}" != "all" ] && [ "${mode}" != "one" ]; then
+        echo "skip. ${message} wrong mode=${mode}. expect all/one";
+        return -3;
+    fi
+    local argument="-is-labeled ${is_labeled} -data-file ${data_file}";
+    set_command;
+    for (( index=$((head_index)); index<=$((tail_index)); index+=1 ))
+    do
+        for density in "dense" "sparse"
+        do
+            local query_prefix="${query_dir}/${density}";
+            for size in 4 8 16 20 24 32
+            do
+                query_file="${query_prefix}-${size}-${index}.txt";
+                if [ ! -f "${query_file}" ]; then
+                    continue;
+                fi
+                echo "${data_file}";
+                echo "${query_file}";
+                echo "isomorphism=${isomorphism}";
+                ${command} ${argument} -query-file "${query_file}";
+                echo;
+            done
+        done
+    done
+}
+
+
+function VEQ_data_query() {
+    # 6:05 AM, Thursday, Aug 3 2023
+    # paper: 2022-Fast subgraph query processing and subgraph matching via
+    # static and dynamic equivalences
+    algorithm="WCOJ";
+    execute="Compile";
+    graph_storage="CSR.1";
+    set_command;
+    local data_name="$1";
+    local mode="$2";
+    local head_index="$3";
+    local tail_index="$4";
+    local is_labeled="1";
+    local message="skip. VEQ_data_query";
+    local query_dir="${dataset_dir}/${data_name}-VEQ";
+    local data_file="${query_dir}/${data_name}.txt";
+    if [ ! "${tail_index}" ]; then
+        # use the default tail_index
+        tail_index=$((head_index+5));
+    fi
+    echo "run VEQ_data_query: data_name=${data_name} mode=${mode}";
+    echo "index=[${head_index}, ${tail_index}]"
+    if [ "${mode}" != "all" ] && [ "${mode}" != "one" ]; then
+        echo "VEQ_data_query wrong mode=${mode}. expect all/one";
+        return -1;
+    fi
+    if [ ! -f "${data_file}" ]; then
+        echo "${message} data not found: ${data_file}";
+        return -1;
+    fi
+    if [ ! -d "${query_dir}" ]; then
+        echo "${message} query_dir not found: ${query_dir}";
+        return -2;
+    fi
+    local argument="-is-labeled ${is_labeled} -data-file ${data_file}";
+    set_command;
+    for (( index=$((head_index)); index<=$((tail_index)); index+=1 ))
+    do
+        for density in "nonsparse" "sparse"
+        do
+            local query_prefix="${query_dir}/${density}";
+            for size in 50 100 150 200
+            do
+                query_file="${query_prefix}/${size}/q${index}.txt";
+                echo "${data_file}";
+                echo "${query_file}";
+                echo "isomorphism=${isomorphism}";
+                ${command} ${argument} -query-file "${query_file}";
+                echo;
+            done
+        done
+    done
+}
+
+
+###############################################################################
+# 22:56 PM Thursday, Oct 26, 2023
+
+
+function run_sample_query() {
+    # reorganize data graph and pattern graph location
+    # 2:35 AM Wednesday Oct 18, 2023
+    local prefix="$1";
+    local is_labeled="$2";
+    local mode="$3";
+    local qset="$4"
+    local head_index="$5";
+    local tail_index="$6";
+    local data_file="${prefix}${suffix}.txt";
+    local query_dir="${prefix}${suffix}-sample-query";
+    # note the placement of $suffix in query_dir
+    local message="error. run_sample_query()";
+    echo "run_sample_query: prefix=${prefix} is_labeled=${is_labeled}";
+    echo "mode=${mode} query_size_set=${qset}";
+    echo "head_index=${head_index} tail_index=${tail_index}";
+    if [ "${mode}" != "all" ] && [ "${mode}" != "one" ]; then
+        echo "${message} wrong mode=${mode}. expect all/one";
+        return -1;
+    fi
+    if [ ! -f "${data_file}" ]; then
+        echo "${message} data not found: ${data_file}";
+        return -1;
+    fi
+    if [ ! -d "${query_dir}" ]; then
+        echo "${message} query_dir not found: ${query_dir}";
+        return -2;
+    fi
+    local argument="-is-labeled ${is_labeled} -data-file ${data_file}";
+    set_command;
+    for (( index=$((head_index)); index<=$((tail_index)); index+=1 ))
+    do
+        if [ "${qset}" == "large" ]; then
+            for size in 4 8 9 10 12 16 20 32
+            do
+                local query_file="${query_dir}/${size}-${index}.txt";
+                if [ -f "${query_file}" ]; then
+                    echo "${data_file}";
+                    echo "${query_file}";
+                    echo "isomorphism=${isomorphism}";
+                    ${command} ${argument} -query-file "${query_file}";
+                    echo;
+                fi
+            done
+        else
+            echo "${message} unknown qset argument: ${qset}";
+        fi
+    done
+}
+
+
+###############################################################################
+# CSR time and space
+
+function csr_profiling() {
+    program="./release.exe";
+    make -j "${program}";
+
+    argument="-algorithm WCOJ -execute Compile -graph-storage CSR.1";
+    argument="${argument} -is-labeled 1 -order-generator RIDataGraph";
+    argument="${argument} -order-generator-add DAG";
+    out_cpp="src/csr/codegen/out.cpp";
+
+    arg="${argument} -isomorphism EdgeInduce";
+    command="time -f total_seconds=%e,max_Kbytes=%M ${program}";
+    prefix="/scratch/hongtai2/edgelist/patents-rapidmatch/labeled/patents";
+
+    for label_count in "" "-200" "-2000"
+    do
+        for query_size in 3 4 5 20 100 1000 1500 2000
+        do
+            git restore "${out_cpp}";
+            data="${prefix}${label_count}.txt";
+            query="${prefix}-sample-query/${query_size}-0.txt";
+            echo "${data}";
+            echo "${query}";
+            echo "isomorphism=EdgeInduce";
+            ${command} ${arg} -data-file "${data}" -query-file "${query}";
+            echo;
+        done
+    done
+}
+
+
+###############################################################################
+# SCE advantage and overhead
+
+function sce_profiling() {
+    program="./profiling.exe";
+    make -j "${program}";
+
+    argument="-algorithm WCOJ -execute Compile -graph-storage CSR.1";
+    argument="${argument} -is-labeled 1 -order-generator RIDataGraph";
+    argument="${argument} -order-generator-add DAG";
+    out_cpp="src/csr/codegen/out.cpp";
+
+    command="time -f total_seconds=%e,max_Kbytes=%M ${program}";
+    prefix="/scratch/hongtai2/edgelist/patents-rapidmatch/labeled/patents";
+
+    for query_size in 3 4 5 20 100 200 1000 1500 2000
+    do
+        for iso in "EdgeInduce" "Homomorphism" "VertexInduce"
+        do
+            data="${prefix}.txt";
+            arg="${argument} -isomorphism ${iso} -data-file ${data}";
+            for i in {0..9}
+            do
+                query="${prefix}-sample-query/${query_size}-${i}.txt";
+                if [ ! -f "${query}" ]; then
+                    continue;
+                fi
+                git restore "${out_cpp}";
+                echo "${data}";
+                echo "${query}";
+                echo "isomorphism=${iso}";
+                ${command} ${arg} -query-file "${query}";
+                echo;
+            done
+        done
+    done
+}
+
+
+###############################################################################
+
+qset="large";
+livejournal="${dataset_dir}/livejournal-directed/unlabeled/livejournal";
+orkut="${dataset_dir}/orkut-undirected/labeled/orkut-50";
+roadca="${dataset_dir}/roadca-undirected/unlabeled/roadca";
+subcategory="${dataset_dir}/subcategory-directed/labeled/subcategory";
+
+if [ "${mode}" == "EdgeInduce" ] || [ "${mode}" == "VertexInduce" ]; then
+    program="./release-DIP-${mode}.exe";
+    DPCMNE_data_query "DIP20170205" "NewMIPS" "one" "8" "25";
+
+    program="./release-hprd-${mode}.exe";
+    VEQ_data_query "hprd" "one" "0" "9";
+
+    program="./release-yeast-${mode}.exe";
+    VEQ_data_query "yeast" "one" "0" "9";
+
+    program="./release-human-${mode}.exe";
+    rapidmatch_data_query "human" "1" "one" "1" "10";
+
+    program="./release-patents-${mode}.exe";
+    rapidmatch_data_query "patents" "1" "one" "1" "10";
+
+    program="./release-roadca-${mode}.exe";
+    run_sample_query "${roadca}" "0" "one" "${qset}" "0" "9";
+
+    program="./release-orkut-${mode}.exe";
+    run_sample_query "${orkut}" "1" "one" "${qset}" "0" "9";
+elif [ "${mode}" == "Homomorphism" ]; then
+    program="./release-subcategory-${mode}.exe";
+    run_sample_query "${subcategory}" "1" "one" "${qset}" "0" "9";
+
+    program="./release-livejournal-${mode}.exe";
+    run_sample_query "${livejournal}" "0" "one" "${qset}" "0" "9";
+elif [ "${mode}" == "profiling" ]; then
+    csr_profiling;
+    sce_profiling;
+fi
