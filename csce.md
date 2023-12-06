@@ -53,7 +53,7 @@ DurationExecutionCompile(s)=0.005 MatchCount=3456
 
 ## Compile the Program
 * require ``make`` and ``g++``
-* download and unzip ``sce.zip``
+* download and unzip ``csce.zip``
 * go to the directory of ``Makefile``
 * compile ``make release``
 * compile file is ``release.exe``
